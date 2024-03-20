@@ -1,0 +1,10 @@
+### Create a new link
+POST http://localhost:3000/create
+Content-Type: application/json
+
+{
+  "targetUrl": "https://p3s.dev"
+}
+
+### Get a link
+GET http://localhost:3000/MjQxMTI4NzE3OA
