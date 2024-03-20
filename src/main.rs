@@ -1,9 +1,15 @@
-mod routes;
-
 use std::error::Error;
 
 use axum::Router;
+use axum::routing::get;
+use axum_prometheus::PrometheusMetricLayer;
+use tower_http::trace::TraceLayer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+
 use routes::health;
+
+mod routes;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -15,9 +21,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let app = Router::new().route("/health", get(health()));
+    let (prometheus_layer, metric_handle) = PrometheusMetricLayer::pair();
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0::3000")
+    let app = Router::new()
+        .route("/metrics", get(|| async move { metric_handle.render() }))
+        .route("/health", get(health))
+        .layer(TraceLayer::new_for_http())
+        .layer(prometheus_layer);
+
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await
         .expect("failed to bind TcpListener");
 
