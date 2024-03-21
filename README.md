@@ -20,9 +20,14 @@ After that it's the usual `cargo run` for local development.
 
 ### Generate migration scripts
 `sqlx migrate add -r links`
+
 Results in:
 ```
 Creating migrations\20240320220510_links.up.sql
 Creating migrations\20240320220510_links.down.sql
 ```
-These are ready to edit.
+
+These are ready to edit - but run `sqlx migrate run` to run the migrations when ready.
+
+## Testing
+See `testing.http` for some example requests.
