@@ -10,7 +10,7 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
 use routes::health;
-use crate::routes::{create_link, redirect, update_link};
+use crate::routes::{create_link, get_link_statistics, redirect, update_link};
 
 mod routes;
 mod utils;
@@ -37,6 +37,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let app = Router::new()
         .route("/create", post(create_link))
+        .route("/:id/stats", get(get_link_statistics))
         .route("/:id", patch(update_link).get(redirect))
         .route("/metrics", get(|| async move { metric_handle.render() }))
         .route("/health", get(health))

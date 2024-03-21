@@ -1,13 +1,13 @@
 use axum::{http::StatusCode, Json, response::IntoResponse};
 use axum::body::Body;
 use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::response::Response;
 use base64::Engine;
 use base64::engine::general_purpose;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use tower::ServiceExt;
 use url::Url;
 
 use crate::utils::internal_error;
@@ -28,6 +28,14 @@ pub struct LinkTarget {
     pub target_url: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CountedLinkStatistic {
+    pub amount: Option<i64>,
+    pub referer: Option<String>,
+    pub user_agent: Option<String>,
+}
+
 ///
 /// Health check route - intended to be called if the service is hosted and monitored.
 ///
@@ -41,6 +49,7 @@ pub async fn health() -> impl IntoResponse {
 pub async fn redirect(
     State(pool): State<PgPool>,
     Path(requested_link): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Response, (StatusCode, String)> {
     let select_timeout = tokio::time::Duration::from_millis(300);
     let link = tokio::time::timeout(
@@ -63,6 +72,32 @@ pub async fn redirect(
         link.target_url
     );
 
+    let referer_header = get_header("referer", &headers);
+    let user_agent_header = get_header("user-agent", &headers);
+
+    let insert_statistics_timeout = tokio::time::Duration::from_millis(300);
+    let saved_statistic = tokio::time::timeout(
+        insert_statistics_timeout,
+        sqlx::query(
+            r#"
+            insert into link_statistics (link_id, referer, user_agent)
+            values ($1, $2, $3)
+            "#
+        ).bind(&requested_link).bind(&referer_header).bind(&user_agent_header)
+            .execute(&pool),
+    ).await;
+
+    match saved_statistic {
+        Err(elapsed) => tracing::error!("saving new link click resulted in a timeout: {}", elapsed),
+        Ok(Err(err)) => tracing::error!("saving new link click resulted in error: {}", err),
+        _ => tracing::debug!(
+            "persisted new link click for link with id {}, referer {} and user-agent {}",
+            requested_link,
+            referer_header.unwrap_or_default(),
+            user_agent_header.unwrap_or_default(),
+        ),
+    };
+
     Ok(Response::builder()
         .status(StatusCode::TEMPORARY_REDIRECT)
         .header("Location", link.target_url)
@@ -70,6 +105,11 @@ pub async fn redirect(
         .body(Body::empty())
         .expect("this response should always be constructable")
     )
+}
+
+fn get_header(key: &str, header_map: &HeaderMap) -> Option<String> {
+    header_map.get(key)
+        .map(|value| value.to_str().unwrap_or_default().to_string())
 }
 
 pub fn generate_id() -> String {
@@ -104,7 +144,7 @@ pub async fn create_link(
             "#,
             &new_link_id,
             &url
-        ).fetch_one(&pool)
+        ).fetch_one(&pool),
     ).await
         .map_err(internal_error)?
         .map_err(internal_error)?;
@@ -140,7 +180,7 @@ pub async fn update_link(
             "#,
             &url,
             &link_id,
-        ).fetch_one(&pool)
+        ).fetch_one(&pool),
     ).await
         .map_err(internal_error)?
         .map_err(internal_error)?;
@@ -148,4 +188,32 @@ pub async fn update_link(
     tracing::debug!("updated link with id {} to target {}", link_id, url);
 
     Ok(Json(link))
+}
+
+///
+/// Route for retrieving link statistics
+///
+pub async fn get_link_statistics(
+    State(pool): State<PgPool>,
+    Path(link_id): Path<String>,
+) -> Result<Json<Vec<CountedLinkStatistic>>, (StatusCode, String)> {
+    let fetch_statistics_timeout = tokio::time::Duration::from_millis(300);
+    let statistics = tokio::time::timeout(
+        fetch_statistics_timeout,
+        sqlx::query_as!(
+            CountedLinkStatistic,
+            r#"
+            select count(*) as amount, referer, user_agent from link_statistics
+                group by link_id, referer, user_agent
+                having link_id = $1
+            "#,
+            &link_id,
+        ).fetch_all(&pool),
+    ).await
+        .map_err(internal_error)?
+        .map_err(internal_error)?;
+
+    tracing::debug!("statistics for link with id {} requested", link_id);
+
+    Ok(Json(statistics))
 }
