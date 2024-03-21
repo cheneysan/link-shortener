@@ -21,4 +21,4 @@ x-api-key: password
 
 ### Get link statistics
 GET http://localhost:3000/MjQxMTI4NzE3OA/stats
-x-api-key: password
+X-Api-Key: password

@@ -5,9 +5,11 @@ use axum::http::HeaderMap;
 use axum::response::Response;
 use base64::Engine;
 use base64::engine::general_purpose;
+use metrics::counter;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::{Error, PgPool};
+use sqlx::error::ErrorKind;
 use url::Url;
 
 use crate::utils::internal_error;
@@ -130,28 +132,44 @@ pub async fn create_link(
 
     let new_link_id = generate_id();
     let insert_link_timeout = tokio::time::Duration::from_millis(300);
-    let new_link = tokio::time::timeout(
-        insert_link_timeout,
-        sqlx::query_as!(
-            Link,
-            r#"
-            with inserted_link as (
-                insert into links(id, target_url)
-                values ($1, $2)
-                returning id, target_url
-            )
-            select id, target_url from inserted_link
-            "#,
-            &new_link_id,
-            &url
-        ).fetch_one(&pool),
-    ).await
-        .map_err(internal_error)?
-        .map_err(internal_error)?;
 
-    tracing::debug!("created new link with id {} targetting {}", new_link_id, url);
+    for _ in 1..=3 {
+        let new_link_id = generate_id();
 
-    Ok(Json(new_link))
+        let new_link = tokio::time::timeout(
+            insert_link_timeout,
+            sqlx::query_as!(
+                Link,
+                r#"
+                with inserted_link as (
+                    insert into links(id, target_url)
+                    values ($1, $2)
+                    returning id, target_url
+                )
+                select id, target_url from inserted_link
+                "#,
+                &new_link_id,
+                &url
+            ).fetch_one(&pool),
+        ).await.map_err(internal_error)?;
+        
+        match new_link {
+            Ok(link) => {
+                tracing::debug!("created new link with id {} targeting {}", new_link_id, url);
+                return Ok(Json(link))
+            }
+            Err(err) => match err {
+                Error::Database(db_err) if db_err.kind() == ErrorKind::UniqueViolation => {}
+                _ => return Err(internal_error(err))
+            }
+        }
+    }
+
+    tracing::error!("could not persist new short link: exhausted all retries for generating a unique id");
+    let counter = counter!("saving_link_impossible_no_unique_id");
+    counter.increment(1);
+
+    Err((StatusCode::INTERNAL_SERVER_ERROR, "internal server error".into()))
 }
 
 ///
