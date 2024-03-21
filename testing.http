@@ -1,6 +1,7 @@
 ### Create a new link
 POST http://localhost:3000/create
 Content-Type: application/json
+x-api-key: password
 
 {
   "targetUrl": "https://www.p3s.dev"
@@ -12,6 +13,7 @@ GET http://localhost:3000/MjQxMTI4NzE3OA
 ### Update a link
 PATCH http://localhost:3000/MjQxMTI4NzE3OA
 Content-Type: application/json
+x-api-key: password
 
 {
   "targetUrl": "https://www.google.com"
@@ -19,3 +21,4 @@ Content-Type: application/json
 
 ### Get link statistics
 GET http://localhost:3000/MjQxMTI4NzE3OA/stats
+x-api-key: password

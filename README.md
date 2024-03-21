@@ -1,5 +1,7 @@
 # Link Shortener - like TinyURL
 
+Based on the video here: https://www.youtube.com/watch?v=9KkTd4eDUMY&t=639s
+
 ## Technologies used
 * Rust
 * Axum (and Tokio behind the scenes)
